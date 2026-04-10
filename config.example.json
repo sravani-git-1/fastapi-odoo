@@ -1,0 +1,6 @@
+{
+  "ODOO_URL": "https://your-instance.odoo.com/",
+  "ODOO_DB": "your_database_name",
+  "ODOO_USERNAME": "your_email@example.com",
+  "ODOO_PASSWORD": "your_password_here"
+}
