@@ -20,11 +20,16 @@ ODOO_DB = os.getenv("ODOO_DB", "your_database_name")
 ODOO_USERNAME = os.getenv("ODOO_USERNAME", "your_email@example.com")
 ODOO_PASSWORD = os.getenv("ODOO_PASSWORD", "your_api_key_or_password")
 
-# Debug logging
-print(f"[DEBUG] ODOO_URL: {ODOO_URL}")
-print(f"[DEBUG] ODOO_DB: {ODOO_DB}")
-print(f"[DEBUG] ODOO_USERNAME: {ODOO_USERNAME}")
-print(f"[DEBUG] ODOO_PASSWORD: {'*' * len(ODOO_PASSWORD) if ODOO_PASSWORD else 'Not set'}")
+# Debug logging - SHOW EXACTLY WHAT WE GOT
+print("\n" + "="*60)
+print("[DEBUG] Environment Variables Loaded:")
+print("="*60)
+print(f"ODOO_URL       : {repr(ODOO_URL)}")
+print(f"ODOO_DB        : {repr(ODOO_DB)}")
+print(f"ODOO_USERNAME  : {repr(ODOO_USERNAME)}")
+print(f"ODOO_PASSWORD  : {repr(ODOO_PASSWORD)}")
+print(f"Password length: {len(ODOO_PASSWORD) if ODOO_PASSWORD else 0}")
+print("="*60 + "\n")
 
 # Validate credentials are loaded
 if not ODOO_URL or ODOO_URL == "https://your-instance.odoo.com":
