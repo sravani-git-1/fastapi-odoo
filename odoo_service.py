@@ -1,6 +1,7 @@
 import os
 import xmlrpc.client
 from pathlib import Path
+from urllib.parse import quote
 from fastapi import HTTPException
 
 # Optional: load .env
@@ -24,6 +25,16 @@ print(f"[DEBUG] ODOO_URL: {ODOO_URL}")
 print(f"[DEBUG] ODOO_DB: {ODOO_DB}")
 print(f"[DEBUG] ODOO_USERNAME: {ODOO_USERNAME}")
 print(f"[DEBUG] ODOO_PASSWORD: {'*' * len(ODOO_PASSWORD) if ODOO_PASSWORD else 'Not set'}")
+
+# Validate credentials are loaded
+if not ODOO_URL or ODOO_URL == "https://your-instance.odoo.com":
+    raise ValueError("❌ ODOO_URL not set in environment variables!")
+if not ODOO_DB or ODOO_DB == "your_database_name":
+    raise ValueError("❌ ODOO_DB not set in environment variables!")
+if not ODOO_USERNAME or ODOO_USERNAME == "your_email@example.com":
+    raise ValueError("❌ ODOO_USERNAME not set in environment variables!")
+if not ODOO_PASSWORD or ODOO_PASSWORD == "your_api_key_or_password":
+    raise ValueError("❌ ODOO_PASSWORD not set in environment variables!")
 
 
 class OdooService:
@@ -51,6 +62,11 @@ class OdooService:
     # -----------------------
     def authenticate(self):
         try:
+            print(f"[DEBUG] Authenticating with:")
+            print(f"  URL: {self.url}")
+            print(f"  DB: {self.db}")
+            print(f"  Username: {self.username}")
+            
             uid = self._common().authenticate(
                 self.db,
                 self.username,
@@ -64,11 +80,13 @@ class OdooService:
                     detail="Odoo authentication failed"
                 )
 
+            print(f"[DEBUG] ✅ Authentication successful! UID: {uid}")
             return uid
 
         except HTTPException:
             raise
         except Exception as exc:
+            print(f"[DEBUG] ❌ Authentication failed: {str(exc)}")
             raise HTTPException(
                 status_code=502,
                 detail=f"Odoo auth error: {str(exc)}"
