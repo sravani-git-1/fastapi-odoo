@@ -1,9 +1,9 @@
 import os
 import xmlrpc.client
 from pathlib import Path
-from urllib.parse import quote
 from fastapi import HTTPException
 import json
+import sys
 
 # -----------------------
 # Config Loading with Fallback
@@ -12,117 +12,149 @@ import json
 def load_config():
     """
     Load configuration with multiple fallbacks:
-    1. Try environment variables first
-    2. If they look corrupted, try loading from config.json
-    3. If Render is detected, use special handling
+    1. Load from config.json (preferred for Render - no special char issues)
+    2. Try environment variables (with validation)
+    3. If corrupted, raise clear error
     """
     
-    # Try to load from environment
     config = {
-        "ODOO_URL": os.getenv("ODOO_URL", "").strip(),
-        "ODOO_DB": os.getenv("ODOO_DB", "").strip(),
-        "ODOO_USERNAME": os.getenv("ODOO_USERNAME", "").strip(),
-        "ODOO_PASSWORD": os.getenv("ODOO_PASSWORD", "").strip(),
+        "ODOO_URL": "",
+        "ODOO_DB": "",
+        "ODOO_USERNAME": "",
+        "ODOO_PASSWORD": "",
     }
     
-    # Check if running on Render
-    is_render = os.getenv("RENDER") == "true"
+    config_file = Path(__file__).parent / "config.json"
+    env_vars = os.environ
     
-    # Detect if variables are corrupted (e.g., password value in DB field)
-    is_corrupted = config["ODOO_DB"] and ("@" in config["ODOO_DB"] or "&" in config["ODOO_DB"])
+    print("\n" + "="*80)
+    print("[INFO] CONFIGURATION LOADING")
+    print("="*80)
+    print(f"Script location: {Path(__file__).parent}")
+    print(f"Config file path: {config_file}")
+    print(f"Config file exists: {config_file.exists()}")
+    print(f"Running on Render: {os.getenv('RENDER') == 'true'}")
+    print()
     
-    print("\n" + "="*70)
-    print("[INFO] Configuration Loading:")
-    print("="*70)
-    print(f"Running on Render: {is_render}")
-    print(f"Env vars corrupted: {is_corrupted}")
-    print(f"ODOO_DB value: {repr(config['ODOO_DB'][:30] if config['ODOO_DB'] else 'empty')}")
+    # STEP 1: Try loading from config.json
+    if config_file.exists():
+        try:
+            with open(config_file, 'r') as f:
+                file_config = json.load(f)
+                config.update(file_config)
+                print("✅ Loaded from config.json")
+                print(f"   - ODOO_URL: {config['ODOO_URL'][:40]}...")
+                print(f"   - ODOO_DB: {config['ODOO_DB']}")
+                print(f"   - ODOO_USERNAME: {config['ODOO_USERNAME']}")
+                print(f"   - ODOO_PASSWORD: {'*' * 8} (length: {len(config['ODOO_PASSWORD'])})")
+                print("="*80 + "\n")
+                return config
+        except Exception as e:
+            print(f"❌ Failed to load config.json: {e}")
+            sys.exit(1)
     
-    # If corrupted, try loading from config file
-    if is_corrupted or not all(config.values()):
-        config_file = Path(__file__).parent / "config.json"
-        if config_file.exists():
-            print(f"⚠️  Environment variables corrupted, loading from {config_file}")
-            try:
-                with open(config_file) as f:
-                    file_config = json.load(f)
-                    config.update(file_config)
-                    print("✅ Config loaded from file successfully")
-            except Exception as e:
-                print(f"❌ Failed to load config.json: {e}")
-        else:
-            print(f"⚠️  config.json not found at {config_file}")
+    # STEP 2: Fall back to environment variables
+    print("⚠️  config.json NOT found, trying environment variables...")
+    config["ODOO_URL"] = os.getenv("ODOO_URL", "").strip()
+    config["ODOO_DB"] = os.getenv("ODOO_DB", "").strip()
+    config["ODOO_USERNAME"] = os.getenv("ODOO_USERNAME", "").strip()
+    config["ODOO_PASSWORD"] = os.getenv("ODOO_PASSWORD", "").strip()
     
-    # Load .env as final fallback (local development)
+    print(f"   - ODOO_URL from env: {config['ODOO_URL'][:40] if config['ODOO_URL'] else 'EMPTY'}...")
+    print(f"   - ODOO_DB from env: {config['ODOO_DB']}")
+    print(f"   - ODOO_USERNAME from env: {config['ODOO_USERNAME']}")
+    print(f"   - ODOO_PASSWORD from env: {'*' * 8 if config['ODOO_PASSWORD'] else 'EMPTY'}")
+    
+    # STEP 3: Check if environment variables are corrupted
+    if config["ODOO_DB"] and ("@" in config["ODOO_DB"] or "&" in config["ODOO_DB"] or "$" in config["ODOO_DB"]):
+        print(f"\n❌ ENVIRONMENT VARIABLES CORRUPTED!")
+        print(f"   ODOO_DB contains special chars (got: {config['ODOO_DB']})")
+        print(f"   This suggests password leaked into DB field!")
+        sys.exit(1)
+    
+    # STEP 4: Try .env file (local dev)
     try:
         from dotenv import load_dotenv
         env_path = Path(__file__).parent / ".env"
         if env_path.exists():
-            load_dotenv(dotenv_path=env_path, override=False)
-            print(f"✅ Loaded .env from {env_path}")
+            print(f"\n📄 Loading from .env file...")
+            load_dotenv(dotenv_path=env_path, override=True)
+            config["ODOO_URL"] = os.getenv("ODOO_URL", config["ODOO_URL"]).strip()
+            config["ODOO_DB"] = os.getenv("ODOO_DB", config["ODOO_DB"]).strip()
+            config["ODOO_USERNAME"] = os.getenv("ODOO_USERNAME", config["ODOO_USERNAME"]).strip()
+            config["ODOO_PASSWORD"] = os.getenv("ODOO_PASSWORD", config["ODOO_PASSWORD"]).strip()
+            print("✅ Loaded from .env file")
     except:
         pass
     
-    print("="*70 + "\n")
+    print("="*80 + "\n")
     return config
 
 # Load configuration
-config = load_config()
+try:
+    config = load_config()
+except SystemExit as e:
+    print("\n" + "!"*80)
+    print("FATAL: Could not load configuration. Please check above for errors.")
+    print("!"*80)
+    raise
 
 # -----------------------
 # Config Variables
 # -----------------------
-ODOO_URL = config["ODOO_URL"] or os.getenv("ODOO_URL", "https://your-instance.odoo.com")
-ODOO_DB = config["ODOO_DB"] or os.getenv("ODOO_DB", "your_database_name")
-ODOO_USERNAME = config["ODOO_USERNAME"] or os.getenv("ODOO_USERNAME", "your_email@example.com")
-ODOO_PASSWORD = config["ODOO_PASSWORD"] or os.getenv("ODOO_PASSWORD", "your_api_key_or_password")
+ODOO_URL = config["ODOO_URL"]
+ODOO_DB = config["ODOO_DB"]
+ODOO_USERNAME = config["ODOO_USERNAME"]
+ODOO_PASSWORD = config["ODOO_PASSWORD"]
 
-# Debug logging
-print("[DEBUG] Final Configuration:")
-print(f"  ODOO_URL       : {ODOO_URL[:50]}..." if len(ODOO_URL) > 50 else f"  ODOO_URL       : {ODOO_URL}")
-print(f"  ODOO_DB        : {ODOO_DB}")
-print(f"  ODOO_USERNAME  : {ODOO_USERNAME}")
-print(f"  ODOO_PASSWORD  : {'*' * min(10, len(ODOO_PASSWORD))}")
-
-# Validate credentials are loaded
+# -----------------------
+# VALIDATION
+# -----------------------
 errors = []
 if not ODOO_URL or ODOO_URL == "https://your-instance.odoo.com":
-    errors.append("ODOO_URL")
+    errors.append("ODOO_URL is empty or default")
 if not ODOO_DB or ODOO_DB == "your_database_name":
-    errors.append("ODOO_DB")
+    errors.append("ODOO_DB is empty or default")
 if not ODOO_USERNAME or ODOO_USERNAME == "your_email@example.com":
-    errors.append("ODOO_USERNAME")
+    errors.append("ODOO_USERNAME is empty or default")
 if not ODOO_PASSWORD or ODOO_PASSWORD == "your_api_key_or_password":
-    errors.append("ODOO_PASSWORD")
+    errors.append("ODOO_PASSWORD is empty or default")
 
 if errors:
     error_msg = f"""
-❌ MISSING CONFIGURATION!
+╔════════════════════════════════════════════════════════════════╗
+║          ❌  MISSING OR INVALID CONFIGURATION  ❌              ║
+╚════════════════════════════════════════════════════════════════╝
 
-The following variables are not set:
-  - {', '.join(errors)}
+ERRORS:
+  {chr(10).join(f'  - {e}' for e in errors)}
 
-SOLUTIONS:
-
-On Render:
-  1. Add a 'config.json' file to your repository with:
+SOLUTION FOR RENDER DEPLOYMENT:
+═══════════════════════════════
+  1. Make sure config.json exists in your repository:
      {{
-       "ODOO_URL": "your-url",
-       "ODOO_DB": "your-db",
-       "ODOO_USERNAME": "your-email",
-       "ODOO_PASSWORD": "your-password"
+       "ODOO_URL": "https://odoo.avowaldatasystems.in/",
+       "ODOO_DB": "odooKmmDb",
+       "ODOO_USERNAME": "rajugenai@gmail.com",
+       "ODOO_PASSWORD": "P@$$W0rd&$@"
      }}
-  
-  2. Or set these environment variables (with special chars properly quoted):
-     ODOO_URL="https://..."
-     ODOO_DB="dbname"
-     ODOO_USERNAME="email@example.com"
-     ODOO_PASSWORD="password"
 
-Locally:
-  1. Create a .env file with the same variables
-  2. Run: python -m uvicorn main:app --reload
+  2. Commit and push it to git
+  3. Redeploy on Render
+
+SOLUTION FOR LOCAL DEVELOPMENT:
+════════════════════════════════
+  1. Create .env in project root:
+     ODOO_URL=https://odoo.avowaldatasystems.in/
+     ODOO_DB=odooKmmDb
+     ODOO_USERNAME=rajugenai@gmail.com
+     ODOO_PASSWORD=P@$$W0rd&$@
+
+  2. Run: uvicorn main:app --reload
+
+WARNING: NEVER commit credentials to git!
 """
+    print(error_msg)
     raise ValueError(error_msg)
 
 

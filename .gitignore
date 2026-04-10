@@ -1,8 +1,10 @@
-# Environment variables
+# Environment variables (local dev only)
 .env
 .env.local
 .env.*.local
-config.json
+# NOTE: config.json is NOT in .gitignore so it deploys to Render
+# BUT: Make sure to NEVER commit it with real credentials!
+# Use .gitignore-local for personal configs if needed
 
 # Python
 __pycache__/
