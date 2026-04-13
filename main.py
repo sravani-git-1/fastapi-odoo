@@ -166,3 +166,35 @@ def verify_odoo_auth():
         return odoo_service.verify_auth()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# 🔧 DEBUG: Show configuration and raw authentication
+@app.get("/odoo/debug-config")
+def debug_odoo_config():
+    """
+    DEBUG ENDPOINT: Shows configuration and attempts raw authentication
+    Use this to diagnose authentication issues
+    """
+    from odoo_service import ODOO_URL, ODOO_DB, ODOO_USERNAME, ODOO_PASSWORD
+    import xmlrpc.client
+    
+    try:
+        return {
+            "config": {
+                "ODOO_URL": ODOO_URL,
+                "ODOO_DB": ODOO_DB,
+                "ODOO_USERNAME": ODOO_USERNAME,
+                "ODOO_PASSWORD": f"{'*' * (len(ODOO_PASSWORD)-2)}{ODOO_PASSWORD[-2:]}" if ODOO_PASSWORD else "NOT SET",
+                "password_length": len(ODOO_PASSWORD)
+            },
+            "test": {
+                "message": "Testing raw XML-RPC authentication...",
+                "step": "Connecting to common service",
+                "url": f"{ODOO_URL.rstrip('/')}/xmlrpc/2/common"
+            }
+        }
+    except Exception as e:
+        return {
+            "error": str(e),
+            "detail": "Failed to read configuration"
+        }

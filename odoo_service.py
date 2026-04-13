@@ -148,9 +148,10 @@ class OdooService:
             print(f"Database: {self.db}", file=sys.stderr)
             print(f"Username: {self.username}", file=sys.stderr)
             print(f"Password length: {len(self.password)} chars", file=sys.stderr)
-            print(f"Attempting authenticate call...", file=sys.stderr)
+            print(f"Attempting authenticate call to {self.url}/xmlrpc/2/common", file=sys.stderr)
+            print(f"Calling: common.authenticate('{self.db}', '{self.username}', '***', {{}})", file=sys.stderr)
             
-            # Try to authenticate
+            # Try to authenticate - this should return a user ID (integer > 0)
             uid = self._common().authenticate(
                 self.db,
                 self.username,
@@ -158,15 +159,21 @@ class OdooService:
                 {}
             )
             
-            print(f"Authentication returned: {uid}", file=sys.stderr)
-            print(f"{'='*60}\n", file=sys.stderr)
-
-            if not uid:
+            print(f"Authentication returned: {uid} (type: {type(uid).__name__})", file=sys.stderr)
+            
+            # Check if uid is valid
+            if not uid or uid == 0 or uid == False:
+                print(f"ERROR: UID is invalid: {uid}", file=sys.stderr)
+                print(f"This means the authenticate call succeeded but returned a bad UID", file=sys.stderr)
+                print(f"Possible cause: Wrong credentials for {self.username} in database {self.db}", file=sys.stderr)
+                print(f"{'='*60}\n", file=sys.stderr)
                 raise HTTPException(
                     status_code=401,
-                    detail="Odoo authentication failed: Server returned empty UID. Check username and password."
+                    detail=f"Odoo authentication failed: Server returned invalid UID '{uid}' for user '{self.username}'. Verify ODOO_USERNAME and ODOO_PASSWORD are correct."
                 )
 
+            print(f"✅ Authentication successful! User ID: {uid}", file=sys.stderr)
+            print(f"{'='*60}\n", file=sys.stderr)
             return uid
 
         except HTTPException:
@@ -176,28 +183,36 @@ class OdooService:
             # Log full error for debugging
             import traceback
             full_traceback = traceback.format_exc()
-            print(f"\n{'='*60}\nAUTH ERROR:\n{full_traceback}\n{'='*60}\n", file=sys.stderr)
+            print(f"\n{'='*60}", file=sys.stderr)
+            print(f"AUTH EXCEPTION (not HTTP):", file=sys.stderr)
+            print(f"Type: {type(exc).__name__}", file=sys.stderr)
+            print(f"Message: {error_msg}", file=sys.stderr)
+            print(f"Full Traceback:\n{full_traceback}", file=sys.stderr)
+            print(f"{'='*60}\n", file=sys.stderr)
             
-            # Provide helpful error messages
-            if "database" in error_msg.lower() and "does not exist" in error_msg.lower():
+            # Provide specific error messages based on error type
+            error_lower = error_msg.lower()
+            
+            if "connection refused" in error_lower or "connection failed" in error_lower:
                 raise HTTPException(
                     status_code=502,
-                    detail=f"Odoo database '{self.db}' does not exist. Check ODOO_DB configuration."
+                    detail=f"Cannot connect to Odoo at {self.url}. The URL might be wrong or Odoo is down."
                 )
-            elif "connection" in error_msg.lower():
+            elif "name or service not known" in error_lower or "getaddrinfo failed" in error_lower:
                 raise HTTPException(
                     status_code=502,
-                    detail=f"Cannot connect to Odoo at {self.url}. Check ODOO_URL configuration and network connectivity."
+                    detail=f"Cannot resolve hostname '{self.url}'. Check that ODOO_URL is correct."
                 )
-            elif "invalid credentials" in error_msg.lower() or "authenticate" in error_msg.lower():
+            elif "database" in error_lower and "does not exist" in error_lower:
                 raise HTTPException(
-                    status_code=401,
-                    detail="Invalid Odoo credentials. Check ODOO_USERNAME and ODOO_PASSWORD."
+                    status_code=502,
+                    detail=f"Database '{self.db}' does not exist in Odoo. Check ODOO_DB is correct."
                 )
             else:
+                # For any other error, show the full message
                 raise HTTPException(
                     status_code=502,
-                    detail=f"Odoo authentication error: {error_msg}"
+                    detail=f"Odoo connection error: {error_msg}"
                 )
 
     # -----------------------
