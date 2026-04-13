@@ -40,6 +40,8 @@ class Config:
             print(f"ODOO_URL value: {url}", file=sys.stderr)
             print(f"ODOO_DB value: {db}", file=sys.stderr)
             print(f"ODOO_USERNAME value: {username}", file=sys.stderr)
+            print(f"ODOO_PASSWORD length: {len(password)}", file=sys.stderr)
+            print(f"ODOO_PASSWORD last 5 chars: ...{password[-5:] if len(password) >= 5 else password}", file=sys.stderr)
             print(f"{'='*60}\n", file=sys.stderr)
             return {
                 "ODOO_URL": url,
@@ -71,6 +73,7 @@ class Config:
                         print(f"ODOO_URL value: {config_data['ODOO_URL']}", file=sys.stderr)
                         print(f"ODOO_DB value: {config_data['ODOO_DB']}", file=sys.stderr)
                         print(f"ODOO_USERNAME value: {config_data['ODOO_USERNAME']}", file=sys.stderr)
+                        print(f"ODOO_PASSWORD length: {len(config_data['ODOO_PASSWORD'])}", file=sys.stderr)
                         print(f"{'='*60}\n", file=sys.stderr)
                         return config_data
             else:
@@ -87,11 +90,11 @@ class Config:
             "  2. Format: { \"ODOO_URL\": \"...\", \"ODOO_DB\": \"...\", \"ODOO_USERNAME\": \"...\", \"ODOO_PASSWORD\": \"...\" }\n"
             "For RENDER deployment:\n"
             "  1. Go to Service Settings > Environment\n"
-            "  2. Add these 4 environment variables:\n"
-            "     - ODOO_URL\n"
-            "     - ODOO_DB\n"
-            "     - ODOO_USERNAME\n"
-            "     - ODOO_PASSWORD\n"
+            "  2. Add these 4 environment variables with SINGLE QUOTES around password:\n"
+            "     - ODOO_URL='https://odoo.avowaldatasystems.in/'\n"
+            "     - ODOO_DB='odooKmmDb'\n"
+            "     - ODOO_USERNAME='rajugenai@gmail.com'\n"
+            "     - ODOO_PASSWORD='P@$$W0rd&$@'  <-- USE SINGLE QUOTES!\n"
             "  3. Redeploy service"
         )
 
@@ -102,16 +105,21 @@ try:
     ODOO_DB = _config["ODOO_DB"]
     ODOO_USERNAME = _config["ODOO_USERNAME"]
     ODOO_PASSWORD = _config["ODOO_PASSWORD"]
+    
     print(f"\n{'='*60}", file=sys.stderr)
     print(f"CONFIGURATION LOADED SUCCESSFULLY", file=sys.stderr)
     print(f"Source: {_config['source']}", file=sys.stderr)
     print(f"URL: {ODOO_URL}", file=sys.stderr)
     print(f"Database: {ODOO_DB}", file=sys.stderr)
     print(f"Username: {ODOO_USERNAME}", file=sys.stderr)
+    print(f"Password (last 5 chars): ...{ODOO_PASSWORD[-5:]}", file=sys.stderr)
     print(f"Password length: {len(ODOO_PASSWORD)} characters", file=sys.stderr)
     print(f"{'='*60}\n", file=sys.stderr)
 except ValueError as e:
     print(f"\n{'='*60}\n{e}\n{'='*60}\n", file=sys.stderr)
+    sys.exit(1)
+except Exception as e:
+    print(f"\n{'='*60}\nUNEXPECTED ERROR LOADING CONFIG:\n{e}\n{'='*60}\n", file=sys.stderr)
     sys.exit(1)
 
 
