@@ -1,161 +1,21 @@
 import os
 import xmlrpc.client
-from pathlib import Path
 from fastapi import HTTPException
-import json
-import sys
 
-# -----------------------
-# Config Loading with Fallback
-# -----------------------
-
-def load_config():
-    """
-    Load configuration with multiple fallbacks:
-    1. Load from config.json (preferred for Render - no special char issues)
-    2. Try environment variables (with validation)
-    3. If corrupted, raise clear error
-    """
-    
-    config = {
-        "ODOO_URL": "",
-        "ODOO_DB": "",
-        "ODOO_USERNAME": "",
-        "ODOO_PASSWORD": "",
-    }
-    
-    config_file = Path(__file__).parent / "config.json"
-    env_vars = os.environ
-    
-    print("\n" + "="*80)
-    print("[INFO] CONFIGURATION LOADING")
-    print("="*80)
-    print(f"Script location: {Path(__file__).parent}")
-    print(f"Config file path: {config_file}")
-    print(f"Config file exists: {config_file.exists()}")
-    print(f"Running on Render: {os.getenv('RENDER') == 'true'}")
-    print()
-    
-    # STEP 1: Try loading from config.json
-    if config_file.exists():
-        try:
-            with open(config_file, 'r') as f:
-                file_config = json.load(f)
-                config.update(file_config)
-                print("✅ Loaded from config.json")
-                print(f"   - ODOO_URL: {config['ODOO_URL'][:40]}...")
-                print(f"   - ODOO_DB: {config['ODOO_DB']}")
-                print(f"   - ODOO_USERNAME: {config['ODOO_USERNAME']}")
-                print(f"   - ODOO_PASSWORD: {'*' * 8} (length: {len(config['ODOO_PASSWORD'])})")
-                print("="*80 + "\n")
-                return config
-        except Exception as e:
-            print(f"❌ Failed to load config.json: {e}")
-            sys.exit(1)
-    
-    # STEP 2: Fall back to environment variables
-    print("⚠️  config.json NOT found, trying environment variables...")
-    config["ODOO_URL"] = os.getenv("ODOO_URL", "").strip()
-    config["ODOO_DB"] = os.getenv("ODOO_DB", "").strip()
-    config["ODOO_USERNAME"] = os.getenv("ODOO_USERNAME", "").strip()
-    config["ODOO_PASSWORD"] = os.getenv("ODOO_PASSWORD", "").strip()
-    
-    print(f"   - ODOO_URL from env: {config['ODOO_URL'][:40] if config['ODOO_URL'] else 'EMPTY'}...")
-    print(f"   - ODOO_DB from env: {config['ODOO_DB']}")
-    print(f"   - ODOO_USERNAME from env: {config['ODOO_USERNAME']}")
-    print(f"   - ODOO_PASSWORD from env: {'*' * 8 if config['ODOO_PASSWORD'] else 'EMPTY'}")
-    
-    # STEP 3: Check if environment variables are corrupted
-    if config["ODOO_DB"] and ("@" in config["ODOO_DB"] or "&" in config["ODOO_DB"] or "$" in config["ODOO_DB"]):
-        print(f"\n❌ ENVIRONMENT VARIABLES CORRUPTED!")
-        print(f"   ODOO_DB contains special chars (got: {config['ODOO_DB']})")
-        print(f"   This suggests password leaked into DB field!")
-        sys.exit(1)
-    
-    # STEP 4: Try .env file (local dev)
-    try:
-        from dotenv import load_dotenv
-        env_path = Path(__file__).parent / ".env"
-        if env_path.exists():
-            print(f"\n📄 Loading from .env file...")
-            load_dotenv(dotenv_path=env_path, override=True)
-            config["ODOO_URL"] = os.getenv("ODOO_URL", config["ODOO_URL"]).strip()
-            config["ODOO_DB"] = os.getenv("ODOO_DB", config["ODOO_DB"]).strip()
-            config["ODOO_USERNAME"] = os.getenv("ODOO_USERNAME", config["ODOO_USERNAME"]).strip()
-            config["ODOO_PASSWORD"] = os.getenv("ODOO_PASSWORD", config["ODOO_PASSWORD"]).strip()
-            print("✅ Loaded from .env file")
-    except:
-        pass
-    
-    print("="*80 + "\n")
-    return config
-
-# Load configuration
+# Optional: load .env
 try:
-    config = load_config()
-except SystemExit as e:
-    print("\n" + "!"*80)
-    print("FATAL: Could not load configuration. Please check above for errors.")
-    print("!"*80)
-    raise
+    from dotenv import load_dotenv
+    load_dotenv()
+except ModuleNotFoundError:
+    pass
 
 # -----------------------
-# Config Variables
+# Config
 # -----------------------
-ODOO_URL = config["ODOO_URL"]
-ODOO_DB = config["ODOO_DB"]
-ODOO_USERNAME = config["ODOO_USERNAME"]
-ODOO_PASSWORD = config["ODOO_PASSWORD"]
-
-# -----------------------
-# VALIDATION
-# -----------------------
-errors = []
-if not ODOO_URL or ODOO_URL == "https://your-instance.odoo.com":
-    errors.append("ODOO_URL is empty or default")
-if not ODOO_DB or ODOO_DB == "your_database_name":
-    errors.append("ODOO_DB is empty or default")
-if not ODOO_USERNAME or ODOO_USERNAME == "your_email@example.com":
-    errors.append("ODOO_USERNAME is empty or default")
-if not ODOO_PASSWORD or ODOO_PASSWORD == "your_api_key_or_password":
-    errors.append("ODOO_PASSWORD is empty or default")
-
-if errors:
-    error_msg = f"""
-╔════════════════════════════════════════════════════════════════╗
-║          ❌  MISSING OR INVALID CONFIGURATION  ❌              ║
-╚════════════════════════════════════════════════════════════════╝
-
-ERRORS:
-  {chr(10).join(f'  - {e}' for e in errors)}
-
-SOLUTION FOR RENDER DEPLOYMENT:
-═══════════════════════════════
-  1. Make sure config.json exists in your repository:
-     {{
-       "ODOO_URL": "https://odoo.avowaldatasystems.in/",
-       "ODOO_DB": "odooKmmDb",
-       "ODOO_USERNAME": "rajugenai@gmail.com",
-       "ODOO_PASSWORD": "P@$$W0rd&$@"
-     }}
-
-  2. Commit and push it to git
-  3. Redeploy on Render
-
-SOLUTION FOR LOCAL DEVELOPMENT:
-════════════════════════════════
-  1. Create .env in project root:
-     ODOO_URL=https://odoo.avowaldatasystems.in/
-     ODOO_DB=odooKmmDb
-     ODOO_USERNAME=rajugenai@gmail.com
-     ODOO_PASSWORD=P@$$W0rd&$@
-
-  2. Run: uvicorn main:app --reload
-
-WARNING: NEVER commit credentials to git!
-"""
-    print(error_msg)
-    raise ValueError(error_msg)
+ODOO_URL = os.getenv("ODOO_URL", "https://your-instance.odoo.com")
+ODOO_DB = os.getenv("ODOO_DB", "your_database_name")
+ODOO_USERNAME = os.getenv("ODOO_USERNAME", "your_email@example.com")
+ODOO_PASSWORD = os.getenv("ODOO_PASSWORD", "your_api_key_or_password")
 
 
 class OdooService:
@@ -183,11 +43,6 @@ class OdooService:
     # -----------------------
     def authenticate(self):
         try:
-            print(f"[DEBUG] Authenticating with:")
-            print(f"  URL: {self.url}")
-            print(f"  DB: {self.db}")
-            print(f"  Username: {self.username}")
-            
             uid = self._common().authenticate(
                 self.db,
                 self.username,
@@ -201,13 +56,11 @@ class OdooService:
                     detail="Odoo authentication failed"
                 )
 
-            print(f"[DEBUG] ✅ Authentication successful! UID: {uid}")
             return uid
 
         except HTTPException:
             raise
         except Exception as exc:
-            print(f"[DEBUG] ❌ Authentication failed: {str(exc)}")
             raise HTTPException(
                 status_code=502,
                 detail=f"Odoo auth error: {str(exc)}"
@@ -351,12 +204,39 @@ class OdooService:
                 [partner_data],
             )
 
+            # Verify creation was successful
+            if not partner_id or partner_id <= 0:
+                raise HTTPException(
+                    status_code=502,
+                    detail="Failed to create partner: Invalid ID returned"
+                )
+
+            # Verify partner exists by reading it
+            verify_creation = models.execute_kw(
+                self.db,
+                uid,
+                self.password,
+                "res.partner",
+                "read",
+                [partner_id],
+                {"fields": ["id", "name"]}
+            )
+
+            if not verify_creation:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Creation verification failed: Partner {partner_id} not found after creation"
+                )
+
             return {
                 "message": "Partner created successfully",
                 "id": partner_id,
-                "data": partner_data
+                "data": partner_data,
+                "created": True
             }
 
+        except HTTPException:
+            raise
         except Exception as exc:
             raise HTTPException(
                 status_code=502,
@@ -400,7 +280,7 @@ class OdooService:
                     update_data["customer_rank"] = 1
                     update_data["supplier_rank"] = 1
 
-            models.execute_kw(
+            update_result = models.execute_kw(
                 self.db,
                 uid,
                 self.password,
@@ -409,9 +289,39 @@ class OdooService:
                 [[partner_id], update_data],
             )
 
+            # Verify update was successful
+            if not update_result:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Failed to update partner {partner_id}: Write operation returned false"
+                )
+
+            # Read back updated values to verify changes were applied
+            field_names = list(update_data.keys())
+            if not field_names:
+                field_names = ["id"]
+
+            updated_partner = models.execute_kw(
+                self.db,
+                uid,
+                self.password,
+                "res.partner",
+                "read",
+                [partner_id],
+                {"fields": field_names}
+            )
+
+            if not updated_partner:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Update verification failed: Partner {partner_id} not found after update"
+                )
+
             return {
                 "message": f"Partner {partner_id} updated successfully",
-                "updated_fields": update_data
+                "updated_fields": update_data,
+                "updated": True,
+                "verified_data": updated_partner[0] if updated_partner else {}
             }
 
         except HTTPException:
@@ -430,6 +340,7 @@ class OdooService:
         models = self._models()
 
         try:
+            # Verify partner exists before deletion
             existing = models.execute_kw(
                 self.db,
                 uid,
@@ -443,7 +354,8 @@ class OdooService:
             if not existing:
                 raise HTTPException(status_code=404, detail="Partner not found")
 
-            models.execute_kw(
+            # Attempt to delete
+            result = models.execute_kw(
                 self.db,
                 uid,
                 self.password,
@@ -452,10 +364,37 @@ class OdooService:
                 [[partner_id]],
             )
 
+            # Verify deletion was successful
+            if not result:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Failed to delete partner {partner_id}: Unlink operation returned false"
+                )
+
+            # Double-check partner no longer exists
+            verify_deleted = models.execute_kw(
+                self.db,
+                uid,
+                self.password,
+                "res.partner",
+                "search",
+                [[["id", "=", partner_id]]],
+                {"limit": 1},
+            )
+
+            if verify_deleted:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Deletion verification failed: Partner {partner_id} still exists"
+                )
+
             return {
-                "message": f"Partner {partner_id} deleted successfully"
+                "message": f"Partner {partner_id} deleted successfully",
+                "deleted": True
             }
 
+        except HTTPException:
+            raise
         except Exception as exc:
             raise HTTPException(
                 status_code=502,
