@@ -127,21 +127,31 @@ class OdooService:
             raise
         except Exception as exc:
             error_msg = str(exc)
+            # Log full error for debugging
+            import traceback
+            full_traceback = traceback.format_exc()
+            print(f"\n{'='*60}\nAUTH ERROR:\n{full_traceback}\n{'='*60}\n", file=sys.stderr)
+            
             # Provide helpful error messages
             if "database" in error_msg.lower() and "does not exist" in error_msg.lower():
                 raise HTTPException(
                     status_code=502,
-                    detail=f"Odoo database error: Check ODOO_DB configuration. Error: {error_msg[:100]}"
+                    detail=f"Odoo database '{self.db}' does not exist. Check ODOO_DB configuration."
                 )
             elif "connection" in error_msg.lower():
                 raise HTTPException(
                     status_code=502,
-                    detail=f"Odoo connection error: Check ODOO_URL. Error: {error_msg[:100]}"
+                    detail=f"Cannot connect to Odoo at {self.url}. Check ODOO_URL configuration and network connectivity."
+                )
+            elif "invalid credentials" in error_msg.lower() or "authenticate" in error_msg.lower():
+                raise HTTPException(
+                    status_code=401,
+                    detail="Invalid Odoo credentials. Check ODOO_USERNAME and ODOO_PASSWORD."
                 )
             else:
                 raise HTTPException(
                     status_code=502,
-                    detail=f"Odoo authentication error: {error_msg[:150]}"
+                    detail=f"Odoo authentication error: {error_msg}"
                 )
 
     # -----------------------
@@ -171,70 +181,75 @@ class OdooService:
         role = self._normalize_role(role)
 
         try:
-            # Build domain based on role - only use customer_rank and supplier_rank
+            # Build domain based on role - use only valid Odoo fields
             if role == "vendor":
-                domains_to_try = [
-                    [["supplier_rank", ">", 0]],
-                ]
+                domain = [["supplier_rank", ">", 0]]
             elif role == "all":
-                domains_to_try = [
-                    ['|', ['customer_rank', '>', 0], ['supplier_rank', '>', 0]],
-                ]
+                domain = ['|', ["customer_rank", ">", 0], ["supplier_rank", ">", 0]]
             else:  # customer
-                domains_to_try = [
-                    [["customer_rank", ">", 0]],
-                ]
+                domain = [["customer_rank", ">", 0]]
 
-            partner_ids = []
-            last_error = None
-
-            for domain in domains_to_try:
-                try:
-                    partner_ids = models.execute_kw(
-                        self.db,
-                        uid,
-                        self.password,
-                        "res.partner",
-                        "search",
-                        [domain],
-                        {"limit": limit},
+            # Search for partner IDs
+            try:
+                partner_ids = models.execute_kw(
+                    self.db,
+                    uid,
+                    self.password,
+                    "res.partner",
+                    "search",
+                    [domain],
+                    {"limit": limit},
+                )
+            except Exception as search_error:
+                error_msg = str(search_error)
+                print(f"\n{'='*60}\nSEARCH ERROR:\n{error_msg}\n{'='*60}\n", file=sys.stderr)
+                
+                if "Invalid field" in error_msg or "field" in error_msg.lower():
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Odoo field error: The search field may not exist in your Odoo instance. Error: {error_msg}"
                     )
-                    if partner_ids:
-                        break
-                except Exception as exc:
-                    last_error = exc
-
-            if not partner_ids:
-                if last_error:
+                else:
                     raise HTTPException(
                         status_code=502,
-                        detail=f"Odoo search failed: {str(last_error)}"
+                        detail=f"Odoo search error: {error_msg}"
                     )
+
+            if not partner_ids:
                 return []
 
-            partners = models.execute_kw(
-                self.db,
-                uid,
-                self.password,
-                "res.partner",
-                "read",
-                [partner_ids],
-                {
-                    "fields": [
-                        "id",
-                        "name",
-                        "email",
-                        "phone",
-                        "mobile",
-                        "company_type",
-                        "vat",
-                        "customer_rank",
-                        "supplier_rank"
-                    ]
-                },
-            )
+            # Read partner data
+            try:
+                partners = models.execute_kw(
+                    self.db,
+                    uid,
+                    self.password,
+                    "res.partner",
+                    "read",
+                    [partner_ids],
+                    {
+                        "fields": [
+                            "id",
+                            "name",
+                            "email",
+                            "phone",
+                            "mobile",
+                            "company_type",
+                            "vat",
+                            "customer_rank",
+                            "supplier_rank"
+                        ]
+                    },
+                )
+            except Exception as read_error:
+                error_msg = str(read_error)
+                print(f"\n{'='*60}\nREAD ERROR:\n{error_msg}\n{'='*60}\n", file=sys.stderr)
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Odoo read error: {error_msg}"
+                )
 
-            # Add a computed 'role' field to each partner based on their ranks
+            # Add computed fields
             for partner in partners:
                 roles = []
                 if partner.get("customer_rank", 0) > 0:
@@ -251,9 +266,11 @@ class OdooService:
         except HTTPException:
             raise
         except Exception as exc:
+            error_msg = str(exc)
+            print(f"\n{'='*60}\nGET PARTNERS ERROR:\n{error_msg}\n{'='*60}\n", file=sys.stderr)
             raise HTTPException(
                 status_code=502,
-                detail=f"Odoo data retrieval error: {str(exc)}"
+                detail=f"Odoo data retrieval error: {error_msg}"
             )
 
     # -----------------------
@@ -277,7 +294,9 @@ class OdooService:
 
             if role == "customer":
                 partner_data["customer_rank"] = 1
+                partner_data["supplier_rank"] = 0
             elif role == "vendor":
+                partner_data["customer_rank"] = 0
                 partner_data["supplier_rank"] = 1
             elif role == "all":
                 partner_data["customer_rank"] = 1
@@ -285,14 +304,24 @@ class OdooService:
 
             partner_data = {k: v for k, v in partner_data.items() if v is not None}
 
-            partner_id = models.execute_kw(
-                self.db,
-                uid,
-                self.password,
-                "res.partner",
-                "create",
-                [partner_data],
-            )
+            print(f"DEBUG: Creating partner with data: {partner_data}", file=sys.stderr)
+
+            try:
+                partner_id = models.execute_kw(
+                    self.db,
+                    uid,
+                    self.password,
+                    "res.partner",
+                    "create",
+                    [partner_data],
+                )
+            except Exception as create_err:
+                error_msg = str(create_err)
+                print(f"\n{'='*60}\nCREATE ERROR:\n{error_msg}\n{'='*60}\n", file=sys.stderr)
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Odoo create error: {error_msg}"
+                )
 
             # Verify creation was successful
             if not partner_id or partner_id <= 0:
@@ -302,15 +331,23 @@ class OdooService:
                 )
 
             # Verify partner exists by reading it
-            verify_creation = models.execute_kw(
-                self.db,
-                uid,
-                self.password,
-                "res.partner",
-                "read",
-                [partner_id],
-                {"fields": ["id", "name", "customer_rank", "supplier_rank"]}
-            )
+            try:
+                verify_creation = models.execute_kw(
+                    self.db,
+                    uid,
+                    self.password,
+                    "res.partner",
+                    "read",
+                    [partner_id],
+                    {"fields": ["id", "name", "customer_rank", "supplier_rank"]}
+                )
+            except Exception as verify_err:
+                error_msg = str(verify_err)
+                print(f"\n{'='*60}\nVERIFY CREATE ERROR:\n{error_msg}\n{'='*60}\n", file=sys.stderr)
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Creation verification failed: {error_msg}"
+                )
 
             if not verify_creation:
                 raise HTTPException(
@@ -339,9 +376,11 @@ class OdooService:
         except HTTPException:
             raise
         except Exception as exc:
+            error_msg = str(exc)
+            print(f"\n{'='*60}\nCREATE PARTNER ERROR:\n{error_msg}\n{'='*60}\n", file=sys.stderr)
             raise HTTPException(
                 status_code=502,
-                detail=f"Odoo create error: {str(exc)}"
+                detail=f"Odoo create error: {error_msg}"
             )
 
     # -----------------------
@@ -375,20 +414,32 @@ class OdooService:
                 role = role.lower()
                 if role == "customer":
                     update_data["customer_rank"] = 1
+                    update_data["supplier_rank"] = 0
                 elif role == "vendor":
+                    update_data["customer_rank"] = 0
                     update_data["supplier_rank"] = 1
                 elif role == "all":
                     update_data["customer_rank"] = 1
                     update_data["supplier_rank"] = 1
 
-            update_result = models.execute_kw(
-                self.db,
-                uid,
-                self.password,
-                "res.partner",
-                "write",
-                [[partner_id], update_data],
-            )
+            print(f"DEBUG: Updating partner {partner_id} with data: {update_data}", file=sys.stderr)
+
+            try:
+                update_result = models.execute_kw(
+                    self.db,
+                    uid,
+                    self.password,
+                    "res.partner",
+                    "write",
+                    [[partner_id], update_data],
+                )
+            except Exception as update_err:
+                error_msg = str(update_err)
+                print(f"\n{'='*60}\nUPDATE ERROR:\n{error_msg}\n{'='*60}\n", file=sys.stderr)
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Odoo update error: {error_msg}"
+                )
 
             # Verify update was successful
             if not update_result:
@@ -399,15 +450,23 @@ class OdooService:
 
             # Read back updated values to verify changes were applied
             read_fields = ["id", "name", "customer_rank", "supplier_rank"] + [f for f in update_data.keys() if f not in ["customer_rank", "supplier_rank"]]
-            updated_partner = models.execute_kw(
-                self.db,
-                uid,
-                self.password,
-                "res.partner",
-                "read",
-                [partner_id],
-                {"fields": read_fields}
-            )
+            try:
+                updated_partner = models.execute_kw(
+                    self.db,
+                    uid,
+                    self.password,
+                    "res.partner",
+                    "read",
+                    [partner_id],
+                    {"fields": read_fields}
+                )
+            except Exception as read_err:
+                error_msg = str(read_err)
+                print(f"\n{'='*60}\nVERIFY UPDATE ERROR:\n{error_msg}\n{'='*60}\n", file=sys.stderr)
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Update verification failed: {error_msg}"
+                )
 
             if not updated_partner:
                 raise HTTPException(
@@ -436,9 +495,11 @@ class OdooService:
         except HTTPException:
             raise
         except Exception as exc:
+            error_msg = str(exc)
+            print(f"\n{'='*60}\nUPDATE PARTNER ERROR:\n{error_msg}\n{'='*60}\n", file=sys.stderr)
             raise HTTPException(
                 status_code=502,
-                detail=f"Odoo update error: {str(exc)}"
+                detail=f"Odoo update error: {error_msg}"
             )
 
     # -----------------------
@@ -450,28 +511,39 @@ class OdooService:
 
         try:
             # Verify partner exists before deletion
-            existing = models.execute_kw(
-                self.db,
-                uid,
-                self.password,
-                "res.partner",
-                "search",
-                [[["id", "=", partner_id]]],
-                {"limit": 1},
-            )
+            try:
+                existing = models.execute_kw(
+                    self.db,
+                    uid,
+                    self.password,
+                    "res.partner",
+                    "search",
+                    [[["id", "=", partner_id]]],
+                    {"limit": 1},
+                )
+            except Exception as search_err:
+                error_msg = str(search_err)
+                print(f"\n{'='*60}\nDELETE SEARCH ERROR:\n{error_msg}\n{'='*60}\n", file=sys.stderr)
+                raise HTTPException(status_code=502, detail=f"Search error: {error_msg}")
 
             if not existing:
                 raise HTTPException(status_code=404, detail="Partner not found")
 
             # Attempt to delete
-            result = models.execute_kw(
-                self.db,
-                uid,
-                self.password,
-                "res.partner",
-                "unlink",
-                [[partner_id]],
-            )
+            print(f"DEBUG: Deleting partner {partner_id}", file=sys.stderr)
+            try:
+                result = models.execute_kw(
+                    self.db,
+                    uid,
+                    self.password,
+                    "res.partner",
+                    "unlink",
+                    [[partner_id]],
+                )
+            except Exception as delete_err:
+                error_msg = str(delete_err)
+                print(f"\n{'='*60}\nDELETE ERROR:\n{error_msg}\n{'='*60}\n", file=sys.stderr)
+                raise HTTPException(status_code=502, detail=f"Odoo delete error: {error_msg}")
 
             # Verify deletion was successful
             if not result:
@@ -481,15 +553,20 @@ class OdooService:
                 )
 
             # Double-check partner no longer exists
-            verify_deleted = models.execute_kw(
-                self.db,
-                uid,
-                self.password,
-                "res.partner",
-                "search",
-                [[["id", "=", partner_id]]],
-                {"limit": 1},
-            )
+            try:
+                verify_deleted = models.execute_kw(
+                    self.db,
+                    uid,
+                    self.password,
+                    "res.partner",
+                    "search",
+                    [[["id", "=", partner_id]]],
+                    {"limit": 1},
+                )
+            except Exception as verify_err:
+                error_msg = str(verify_err)
+                print(f"\n{'='*60}\nDELETE VERIFY ERROR:\n{error_msg}\n{'='*60}\n", file=sys.stderr)
+                raise HTTPException(status_code=502, detail=f"Verification error: {error_msg}")
 
             if verify_deleted:
                 raise HTTPException(
@@ -505,9 +582,11 @@ class OdooService:
         except HTTPException:
             raise
         except Exception as exc:
+            error_msg = str(exc)
+            print(f"\n{'='*60}\nDELETE PARTNER ERROR:\n{error_msg}\n{'='*60}\n", file=sys.stderr)
             raise HTTPException(
                 status_code=502,
-                detail=f"Odoo delete error: {str(exc)}"
+                detail=f"Odoo delete error: {error_msg}"
             )
 
     # -----------------------
