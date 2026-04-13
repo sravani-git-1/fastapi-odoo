@@ -21,13 +21,26 @@ class Config:
     def get_from_env_or_file():
         """Load config with proper priority: env vars > config.json > error"""
         # Priority 1: Environment variables (production)
-        url = os.getenv("ODOO_URL", "").strip()
-        db = os.getenv("ODOO_DB", "").strip()
-        username = os.getenv("ODOO_USERNAME", "").strip()
-        password = os.getenv("ODOO_PASSWORD", "").strip()
+        url = (os.getenv("ODOO_URL") or "").strip()
+        db = (os.getenv("ODOO_DB") or "").strip()
+        username = (os.getenv("ODOO_USERNAME") or "").strip()
+        password = (os.getenv("ODOO_PASSWORD") or "").strip()
+        
+        # Debug: Log what was found
+        print(f"\n{'='*60}", file=sys.stderr)
+        print(f"CONFIG LOADING: Checking environment variables", file=sys.stderr)
+        print(f"ODOO_URL from env: {'SET' if url else 'NOT SET'}", file=sys.stderr)
+        print(f"ODOO_DB from env: {'SET' if db else 'NOT SET'}", file=sys.stderr)
+        print(f"ODOO_USERNAME from env: {'SET' if username else 'NOT SET'}", file=sys.stderr)
+        print(f"ODOO_PASSWORD from env: {'SET' if password else 'NOT SET'} (length: {len(password)})", file=sys.stderr)
         
         # If env vars are set, use them
         if url and db and username and password:
+            print(f"CONFIG: Using environment variables", file=sys.stderr)
+            print(f"ODOO_URL value: {url}", file=sys.stderr)
+            print(f"ODOO_DB value: {db}", file=sys.stderr)
+            print(f"ODOO_USERNAME value: {username}", file=sys.stderr)
+            print(f"{'='*60}\n", file=sys.stderr)
             return {
                 "ODOO_URL": url,
                 "ODOO_DB": db,
@@ -37,23 +50,35 @@ class Config:
             }
         
         # Priority 2: config.json (development)
+        print(f"CONFIG: Environment variables incomplete, trying config.json", file=sys.stderr)
         try:
             config_path = os.path.join(os.path.dirname(__file__), "config.json")
+            print(f"CONFIG: Looking for config.json at: {config_path}", file=sys.stderr)
             if os.path.exists(config_path):
+                print(f"CONFIG: Found config.json, reading...", file=sys.stderr)
                 with open(config_path, "r") as f:
                     json_config = json.load(f)
                     # Validate all keys exist in config.json
                     if all(key in json_config for key in ["ODOO_URL", "ODOO_DB", "ODOO_USERNAME", "ODOO_PASSWORD"]):
-                        return {
-                            "ODOO_URL": json_config["ODOO_URL"].strip(),
-                            "ODOO_DB": json_config["ODOO_DB"].strip(),
-                            "ODOO_USERNAME": json_config["ODOO_USERNAME"].strip(),
-                            "ODOO_PASSWORD": json_config["ODOO_PASSWORD"].strip(),
+                        config_data = {
+                            "ODOO_URL": (json_config["ODOO_URL"] or "").strip(),
+                            "ODOO_DB": (json_config["ODOO_DB"] or "").strip(),
+                            "ODOO_USERNAME": (json_config["ODOO_USERNAME"] or "").strip(),
+                            "ODOO_PASSWORD": (json_config["ODOO_PASSWORD"] or "").strip(),
                             "source": "config.json"
                         }
-        except (FileNotFoundError, json.JSONDecodeError, IOError):
-            pass
+                        print(f"CONFIG: Successfully loaded from config.json", file=sys.stderr)
+                        print(f"ODOO_URL value: {config_data['ODOO_URL']}", file=sys.stderr)
+                        print(f"ODOO_DB value: {config_data['ODOO_DB']}", file=sys.stderr)
+                        print(f"ODOO_USERNAME value: {config_data['ODOO_USERNAME']}", file=sys.stderr)
+                        print(f"{'='*60}\n", file=sys.stderr)
+                        return config_data
+            else:
+                print(f"CONFIG: config.json not found at {config_path}", file=sys.stderr)
+        except (FileNotFoundError, json.JSONDecodeError, IOError) as e:
+            print(f"CONFIG: Error reading config.json: {e}", file=sys.stderr)
         
+        print(f"{'='*60}\n", file=sys.stderr)
         # Priority 3: Raise error with instructions
         raise ValueError(
             "FATAL: No valid configuration found!\n"
@@ -77,6 +102,14 @@ try:
     ODOO_DB = _config["ODOO_DB"]
     ODOO_USERNAME = _config["ODOO_USERNAME"]
     ODOO_PASSWORD = _config["ODOO_PASSWORD"]
+    print(f"\n{'='*60}", file=sys.stderr)
+    print(f"CONFIGURATION LOADED SUCCESSFULLY", file=sys.stderr)
+    print(f"Source: {_config['source']}", file=sys.stderr)
+    print(f"URL: {ODOO_URL}", file=sys.stderr)
+    print(f"Database: {ODOO_DB}", file=sys.stderr)
+    print(f"Username: {ODOO_USERNAME}", file=sys.stderr)
+    print(f"Password length: {len(ODOO_PASSWORD)} characters", file=sys.stderr)
+    print(f"{'='*60}\n", file=sys.stderr)
 except ValueError as e:
     print(f"\n{'='*60}\n{e}\n{'='*60}\n", file=sys.stderr)
     sys.exit(1)
@@ -108,17 +141,30 @@ class OdooService:
     def authenticate(self):
         """Authenticate with Odoo and return user ID"""
         try:
+            # Log connection attempt
+            print(f"\n{'='*60}", file=sys.stderr)
+            print(f"ODOO AUTHENTICATION DEBUG", file=sys.stderr)
+            print(f"URL: {self.url}", file=sys.stderr)
+            print(f"Database: {self.db}", file=sys.stderr)
+            print(f"Username: {self.username}", file=sys.stderr)
+            print(f"Password length: {len(self.password)} chars", file=sys.stderr)
+            print(f"Attempting authenticate call...", file=sys.stderr)
+            
+            # Try to authenticate
             uid = self._common().authenticate(
                 self.db,
                 self.username,
                 self.password,
                 {}
             )
+            
+            print(f"Authentication returned: {uid}", file=sys.stderr)
+            print(f"{'='*60}\n", file=sys.stderr)
 
             if not uid:
                 raise HTTPException(
                     status_code=401,
-                    detail="Odoo authentication failed: Invalid credentials"
+                    detail="Odoo authentication failed: Server returned empty UID. Check username and password."
                 )
 
             return uid
