@@ -1,4 +1,5 @@
 import os
+import json
 import xmlrpc.client
 from fastapi import HTTPException
 
@@ -12,10 +13,45 @@ except ModuleNotFoundError:
 # -----------------------
 # Config
 # -----------------------
-ODOO_URL = os.getenv("ODOO_URL", "https://your-instance.odoo.com")
-ODOO_DB = os.getenv("ODOO_DB", "your_database_name")
-ODOO_USERNAME = os.getenv("ODOO_USERNAME", "your_email@example.com")
-ODOO_PASSWORD = os.getenv("ODOO_PASSWORD", "your_api_key_or_password")
+def load_config():
+    """Load config from env variables, .env file, or config.json"""
+    config = {
+        "ODOO_URL": os.getenv("ODOO_URL"),
+        "ODOO_DB": os.getenv("ODOO_DB"),
+        "ODOO_USERNAME": os.getenv("ODOO_USERNAME"),
+        "ODOO_PASSWORD": os.getenv("ODOO_PASSWORD"),
+    }
+    
+    # If any config is missing, try to load from config.json
+    if not all(config.values()):
+        try:
+            with open("config.json", "r") as f:
+                json_config = json.load(f)
+                for key in config:
+                    if not config[key]:
+                        config[key] = json_config.get(key)
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+    
+    # Use defaults if still missing
+    defaults = {
+        "ODOO_URL": "https://your-instance.odoo.com",
+        "ODOO_DB": "your_database_name",
+        "ODOO_USERNAME": "your_email@example.com",
+        "ODOO_PASSWORD": "your_api_key_or_password"
+    }
+    
+    for key in config:
+        if not config[key]:
+            config[key] = defaults[key]
+    
+    return config
+
+config = load_config()
+ODOO_URL = config["ODOO_URL"]
+ODOO_DB = config["ODOO_DB"]
+ODOO_USERNAME = config["ODOO_USERNAME"]
+ODOO_PASSWORD = config["ODOO_PASSWORD"]
 
 
 class OdooService:
@@ -151,10 +187,24 @@ class OdooService:
                         "phone",
                         "mobile",
                         "company_type",
-                        "vat"
+                        "vat",
+                        "customer_rank",
+                        "supplier_rank"
                     ]
                 },
             )
+
+            # Add a computed 'role' field to each partner based on their ranks
+            for partner in partners:
+                roles = []
+                if partner.get("customer_rank", 0) > 0:
+                    roles.append("customer")
+                if partner.get("supplier_rank", 0) > 0:
+                    roles.append("vendor")
+                
+                partner["roles"] = roles if roles else ["other"]
+                partner["is_customer"] = partner.get("customer_rank", 0) > 0
+                partner["is_vendor"] = partner.get("supplier_rank", 0) > 0
 
             return partners
 
@@ -219,7 +269,7 @@ class OdooService:
                 "res.partner",
                 "read",
                 [partner_id],
-                {"fields": ["id", "name"]}
+                {"fields": ["id", "name", "customer_rank", "supplier_rank"]}
             )
 
             if not verify_creation:
@@ -228,10 +278,21 @@ class OdooService:
                     detail=f"Creation verification failed: Partner {partner_id} not found after creation"
                 )
 
+            # Compute roles
+            created_partner = verify_creation[0]
+            roles = []
+            if created_partner.get("customer_rank", 0) > 0:
+                roles.append("customer")
+            if created_partner.get("supplier_rank", 0) > 0:
+                roles.append("vendor")
+
             return {
                 "message": "Partner created successfully",
                 "id": partner_id,
                 "data": partner_data,
+                "roles": roles if roles else ["other"],
+                "is_customer": created_partner.get("customer_rank", 0) > 0,
+                "is_vendor": created_partner.get("supplier_rank", 0) > 0,
                 "created": True
             }
 
@@ -297,10 +358,7 @@ class OdooService:
                 )
 
             # Read back updated values to verify changes were applied
-            field_names = list(update_data.keys())
-            if not field_names:
-                field_names = ["id"]
-
+            read_fields = ["id", "name", "customer_rank", "supplier_rank"] + [f for f in update_data.keys() if f not in ["customer_rank", "supplier_rank"]]
             updated_partner = models.execute_kw(
                 self.db,
                 uid,
@@ -308,7 +366,7 @@ class OdooService:
                 "res.partner",
                 "read",
                 [partner_id],
-                {"fields": field_names}
+                {"fields": read_fields}
             )
 
             if not updated_partner:
@@ -317,11 +375,22 @@ class OdooService:
                     detail=f"Update verification failed: Partner {partner_id} not found after update"
                 )
 
+            # Compute roles
+            partner_data = updated_partner[0]
+            roles = []
+            if partner_data.get("customer_rank", 0) > 0:
+                roles.append("customer")
+            if partner_data.get("supplier_rank", 0) > 0:
+                roles.append("vendor")
+
             return {
                 "message": f"Partner {partner_id} updated successfully",
                 "updated_fields": update_data,
+                "roles": roles if roles else ["other"],
+                "is_customer": partner_data.get("customer_rank", 0) > 0,
+                "is_vendor": partner_data.get("supplier_rank", 0) > 0,
                 "updated": True,
-                "verified_data": updated_partner[0] if updated_partner else {}
+                "verified_data": partner_data
             }
 
         except HTTPException:
