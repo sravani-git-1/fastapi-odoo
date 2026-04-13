@@ -1,10 +1,13 @@
-# Environment variables (local dev only)
+# SECURITY: NEVER commit files with credentials!
+config.json
 .env
 .env.local
 .env.*.local
-# NOTE: config.json is NOT in .gitignore so it deploys to Render
-# BUT: Make sure to NEVER commit it with real credentials!
-# Use .gitignore-local for personal configs if needed
+.env.*.example
+
+# NOTE: config.json is ONLY for local development
+# MUST be added to .gitignore to prevent credential leaks
+# For Render: Use environment variables instead
 
 # Python
 __pycache__/
