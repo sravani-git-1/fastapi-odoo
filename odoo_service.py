@@ -1,5 +1,6 @@
 import os
 import json
+import sys
 import xmlrpc.client
 from fastapi import HTTPException
 
@@ -11,46 +12,74 @@ except ModuleNotFoundError:
     pass
 
 # -----------------------
-# Config
+# Config - Production Ready
 # -----------------------
-def load_config():
-    """Load config from env variables, .env file, or config.json"""
-    config = {
-        "ODOO_URL": os.getenv("ODOO_URL"),
-        "ODOO_DB": os.getenv("ODOO_DB"),
-        "ODOO_USERNAME": os.getenv("ODOO_USERNAME"),
-        "ODOO_PASSWORD": os.getenv("ODOO_PASSWORD"),
-    }
+class Config:
+    """Robust configuration management for local and production"""
     
-    # If any config is missing, try to load from config.json (local development only)
-    if not all(config.values()):
+    @staticmethod
+    def get_from_env_or_file():
+        """Load config with proper priority: env vars > config.json > error"""
+        # Priority 1: Environment variables (production)
+        url = os.getenv("ODOO_URL", "").strip()
+        db = os.getenv("ODOO_DB", "").strip()
+        username = os.getenv("ODOO_USERNAME", "").strip()
+        password = os.getenv("ODOO_PASSWORD", "").strip()
+        
+        # If env vars are set, use them
+        if url and db and username and password:
+            return {
+                "ODOO_URL": url,
+                "ODOO_DB": db,
+                "ODOO_USERNAME": username,
+                "ODOO_PASSWORD": password,
+                "source": "environment variables"
+            }
+        
+        # Priority 2: config.json (development)
         try:
             config_path = os.path.join(os.path.dirname(__file__), "config.json")
             if os.path.exists(config_path):
                 with open(config_path, "r") as f:
                     json_config = json.load(f)
-                    for key in config:
-                        if not config[key]:
-                            config[key] = json_config.get(key)
+                    # Validate all keys exist in config.json
+                    if all(key in json_config for key in ["ODOO_URL", "ODOO_DB", "ODOO_USERNAME", "ODOO_PASSWORD"]):
+                        return {
+                            "ODOO_URL": json_config["ODOO_URL"].strip(),
+                            "ODOO_DB": json_config["ODOO_DB"].strip(),
+                            "ODOO_USERNAME": json_config["ODOO_USERNAME"].strip(),
+                            "ODOO_PASSWORD": json_config["ODOO_PASSWORD"].strip(),
+                            "source": "config.json"
+                        }
         except (FileNotFoundError, json.JSONDecodeError, IOError):
             pass
-    
-    # Validate all required config is present
-    missing = [key for key, val in config.items() if not val]
-    if missing:
+        
+        # Priority 3: Raise error with instructions
         raise ValueError(
-            f"Missing required configuration: {', '.join(missing)}. "
-            f"Please set these as environment variables or in config.json. "
-            f"For Render deployment, set environment variables in Settings > Environment."
+            "FATAL: No valid configuration found!\n"
+            "For LOCAL development:\n"
+            "  1. Create config.json in project root with Odoo credentials\n"
+            "  2. Format: { \"ODOO_URL\": \"...\", \"ODOO_DB\": \"...\", \"ODOO_USERNAME\": \"...\", \"ODOO_PASSWORD\": \"...\" }\n"
+            "For RENDER deployment:\n"
+            "  1. Go to Service Settings > Environment\n"
+            "  2. Add these 4 environment variables:\n"
+            "     - ODOO_URL\n"
+            "     - ODOO_DB\n"
+            "     - ODOO_USERNAME\n"
+            "     - ODOO_PASSWORD\n"
+            "  3. Redeploy service"
         )
-    
-    return config
 
-config = load_config()
-ODOO_URL = config["ODOO_URL"]
-ODOO_DB = config["ODOO_DB"]
-ODOO_USERNAME = config["ODOO_USERNAME"]
-ODOO_PASSWORD = config["ODOO_PASSWORD"]
+# Load configuration on startup
+try:
+    _config = Config.get_from_env_or_file()
+    ODOO_URL = _config["ODOO_URL"]
+    ODOO_DB = _config["ODOO_DB"]
+    ODOO_USERNAME = _config["ODOO_USERNAME"]
+    ODOO_PASSWORD = _config["ODOO_PASSWORD"]
+except ValueError as e:
+    print(f"\n{'='*60}\n{e}\n{'='*60}\n", file=sys.stderr)
+    sys.exit(1)
 
 
 class OdooService:
@@ -77,6 +106,7 @@ class OdooService:
     # Authentication
     # -----------------------
     def authenticate(self):
+        """Authenticate with Odoo and return user ID"""
         try:
             uid = self._common().authenticate(
                 self.db,
@@ -88,7 +118,7 @@ class OdooService:
             if not uid:
                 raise HTTPException(
                     status_code=401,
-                    detail="Odoo authentication failed"
+                    detail="Odoo authentication failed: Invalid credentials"
                 )
 
             return uid
@@ -96,10 +126,23 @@ class OdooService:
         except HTTPException:
             raise
         except Exception as exc:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Odoo auth error: {str(exc)}"
-            )
+            error_msg = str(exc)
+            # Provide helpful error messages
+            if "database" in error_msg.lower() and "does not exist" in error_msg.lower():
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Odoo database error: Check ODOO_DB configuration. Error: {error_msg[:100]}"
+                )
+            elif "connection" in error_msg.lower():
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Odoo connection error: Check ODOO_URL. Error: {error_msg[:100]}"
+                )
+            else:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Odoo authentication error: {error_msg[:150]}"
+                )
 
     # -----------------------
     # Normalize role
