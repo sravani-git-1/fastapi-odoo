@@ -171,20 +171,18 @@ class OdooService:
         role = self._normalize_role(role)
 
         try:
+            # Build domain based on role - only use customer_rank and supplier_rank
             if role == "vendor":
                 domains_to_try = [
                     [["supplier_rank", ">", 0]],
-                    [["is_supplier", "=", True]],
                 ]
             elif role == "all":
                 domains_to_try = [
                     ['|', ['customer_rank', '>', 0], ['supplier_rank', '>', 0]],
-                    ['|', ['is_customer', '=', True], ['is_supplier', '=', True]],
                 ]
-            else:
+            else:  # customer
                 domains_to_try = [
                     [["customer_rank", ">", 0]],
-                    [["is_customer", "=", True]],
                 ]
 
             partner_ids = []
