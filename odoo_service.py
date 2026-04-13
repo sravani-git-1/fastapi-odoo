@@ -22,28 +22,27 @@ def load_config():
         "ODOO_PASSWORD": os.getenv("ODOO_PASSWORD"),
     }
     
-    # If any config is missing, try to load from config.json
+    # If any config is missing, try to load from config.json (local development only)
     if not all(config.values()):
         try:
-            with open("config.json", "r") as f:
-                json_config = json.load(f)
-                for key in config:
-                    if not config[key]:
-                        config[key] = json_config.get(key)
-        except (FileNotFoundError, json.JSONDecodeError):
+            config_path = os.path.join(os.path.dirname(__file__), "config.json")
+            if os.path.exists(config_path):
+                with open(config_path, "r") as f:
+                    json_config = json.load(f)
+                    for key in config:
+                        if not config[key]:
+                            config[key] = json_config.get(key)
+        except (FileNotFoundError, json.JSONDecodeError, IOError):
             pass
     
-    # Use defaults if still missing
-    defaults = {
-        "ODOO_URL": "https://your-instance.odoo.com",
-        "ODOO_DB": "your_database_name",
-        "ODOO_USERNAME": "your_email@example.com",
-        "ODOO_PASSWORD": "your_api_key_or_password"
-    }
-    
-    for key in config:
-        if not config[key]:
-            config[key] = defaults[key]
+    # Validate all required config is present
+    missing = [key for key, val in config.items() if not val]
+    if missing:
+        raise ValueError(
+            f"Missing required configuration: {', '.join(missing)}. "
+            f"Please set these as environment variables or in config.json. "
+            f"For Render deployment, set environment variables in Settings > Environment."
+        )
     
     return config
 
