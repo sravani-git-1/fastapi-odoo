@@ -128,6 +128,15 @@ def get_items(db: Session = Depends(get_db)):
 # Odoo APIs (CRUD)
 # -----------------------
 
+# ✅ GET partners
+@app.get("/odoo/partners")
+def get_odoo_partners(role: str = "customer", limit: int = 100):
+    try:
+        return odoo_service.get_partners(role=role, limit=limit)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/customers")
 def customers(payload: PartnerActionPayload):
     action = payload.action
