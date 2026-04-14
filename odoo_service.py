@@ -536,6 +536,28 @@ class OdooService:
     def get_vendors(self, limit: int = 100):
         return self.get_partners(role="vendor", limit=limit)
 
+    def create_customer(self, data: dict):
+        data = data.copy()
+        data["role"] = "customer"
+        return self.create_partner(data)
+
+    def create_vendor(self, data: dict):
+        data = data.copy()
+        data["role"] = "vendor"
+        return self.create_partner(data)
+
+    def update_customer(self, customer_id: int, data: dict):
+        return self.update_partner(customer_id, data)
+
+    def update_vendor(self, vendor_id: int, data: dict):
+        return self.update_partner(vendor_id, data)
+
+    def delete_customer(self, customer_id: int):
+        return self.delete_partner(customer_id)
+
+    def delete_vendor(self, vendor_id: int):
+        return self.delete_partner(vendor_id)
+
     def get_customer_by_id(self, customer_id: int):
         uid = self.authenticate()
         models = self._models()

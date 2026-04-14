@@ -81,7 +81,7 @@ class PartnerUpdate(BaseModel):
     role: Optional[Literal["customer", "vendor", "all"]] = None
 
 
-class CustomerActionPayload(BaseModel):
+class PartnerActionPayload(BaseModel):
     action: Literal["create", "read", "update", "delete", "list"]
     id: Optional[int] = None
     query: Optional[str] = None
@@ -91,7 +91,7 @@ class CustomerActionPayload(BaseModel):
     mobile: Optional[str] = None
     company_type: Optional[Literal["person", "company"]] = None
     vat: Optional[str] = None
-    role: Optional[Literal["customer", "vendor", "all"]] = "customer"
+    role: Optional[Literal["customer", "vendor", "all"]] = None
     limit: Optional[int] = 100
 
 
@@ -147,7 +147,7 @@ def get_odoo_customers(limit: int = 100):
 
 
 @app.post("/customers")
-def customers(payload: CustomerActionPayload):
+def customers(payload: PartnerActionPayload):
     action = payload.action
 
     try:
@@ -155,8 +155,10 @@ def customers(payload: CustomerActionPayload):
             partner_data = payload.dict(exclude_none=True)
             for key in ["action", "id", "query", "limit"]:
                 partner_data.pop(key, None)
+            if "role" not in partner_data or not partner_data["role"]:
+                partner_data["role"] = "customer"
 
-            return odoo_service.create_partner(partner_data)
+            return odoo_service.create_customer(partner_data)
 
         elif action == "read":
             if payload.id is not None:
@@ -181,7 +183,7 @@ def customers(payload: CustomerActionPayload):
         elif action == "delete":
             if payload.id is None:
                 raise HTTPException(status_code=400, detail="delete requires id")
-            return odoo_service.delete_partner(payload.id)
+            return odoo_service.delete_customer(payload.id)
 
         elif action == "list":
             return odoo_service.get_customers(limit=payload.limit or 100)
@@ -194,7 +196,7 @@ def customers(payload: CustomerActionPayload):
 
 
 @app.post("/vendors")
-def vendors(payload: CustomerActionPayload):
+def vendors(payload: PartnerActionPayload):
     action = payload.action
 
     try:
@@ -205,7 +207,7 @@ def vendors(payload: CustomerActionPayload):
             if "role" not in partner_data or not partner_data["role"]:
                 partner_data["role"] = "vendor"
 
-            return odoo_service.create_partner(partner_data)
+            return odoo_service.create_vendor(partner_data)
 
         elif action == "read":
             if payload.id is not None:
@@ -230,7 +232,7 @@ def vendors(payload: CustomerActionPayload):
         elif action == "delete":
             if payload.id is None:
                 raise HTTPException(status_code=400, detail="delete requires id")
-            return odoo_service.delete_partner(payload.id)
+            return odoo_service.delete_vendor(payload.id)
 
         elif action == "list":
             return odoo_service.get_vendors(limit=payload.limit or 100)
