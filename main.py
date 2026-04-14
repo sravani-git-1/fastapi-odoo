@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Request
 from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 from pydantic import BaseModel, EmailStr
@@ -40,14 +40,12 @@ class Item(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
 
-# Create tables
 Base.metadata.create_all(bind=engine)
 
 # -----------------------
 # Pydantic Schemas
 # -----------------------
 
-# Item schemas
 class ItemCreate(BaseModel):
     name: str
 
@@ -56,10 +54,9 @@ class ItemResponse(BaseModel):
     name: str
 
     class Config:
-        from_attributes = True   # ✅ Pydantic v2 fix
+        from_attributes = True
 
 
-# Odoo Partner Create
 class PartnerCreate(BaseModel):
     name: str
     email: Optional[EmailStr] = None
@@ -70,7 +67,6 @@ class PartnerCreate(BaseModel):
     role: Optional[Literal["customer", "vendor", "all"]] = "customer"
 
 
-# Odoo Partner Update (all optional)
 class PartnerUpdate(BaseModel):
     name: Optional[str] = None
     email: Optional[EmailStr] = None
@@ -109,7 +105,6 @@ def get_db():
 # -----------------------
 # Local Item APIs
 # -----------------------
-
 @app.post("/items/", response_model=ItemResponse)
 def create_item(item: ItemCreate, db: Session = Depends(get_db)):
     db_item = Item(name=item.name)
@@ -128,17 +123,12 @@ def get_items(db: Session = Depends(get_db)):
 # Odoo APIs (CRUD)
 # -----------------------
 
-# ✅ GET partners
-@app.get("/odoo/partners")
-def get_odoo_partners(role: str = "customer", limit: int = 100):
-    try:
-        return odoo_service.get_partners(role=role, limit=limit)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @app.post("/customers")
-def customers(payload: PartnerActionPayload):
+async def customers(request: Request):
+    raw_data = await request.json()
+    clean_data = {k: v for k, v in raw_data.items() if v not in ["", None]}
+    payload = PartnerActionPayload(**clean_data)
+
     action = payload.action
 
     try:
@@ -187,7 +177,11 @@ def customers(payload: PartnerActionPayload):
 
 
 @app.post("/vendors")
-def vendors(payload: PartnerActionPayload):
+async def vendors(request: Request):
+    raw_data = await request.json()
+    clean_data = {k: v for k, v in raw_data.items() if v not in ["", None]}
+    payload = PartnerActionPayload(**clean_data)
+
     action = payload.action
 
     try:
@@ -233,44 +227,3 @@ def vendors(payload: PartnerActionPayload):
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
-
-
-# ✅ Verify Odoo auth
-@app.get("/odoo/auth-verify")
-def verify_odoo_auth():
-    try:
-        return odoo_service.verify_auth()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# 🔧 DEBUG: Show configuration and raw authentication
-@app.get("/odoo/debug-config")
-def debug_odoo_config():
-    """
-    DEBUG ENDPOINT: Shows configuration and attempts raw authentication
-    Use this to diagnose authentication issues
-    """
-    from odoo_service import ODOO_URL, ODOO_DB, ODOO_USERNAME, ODOO_PASSWORD
-    import xmlrpc.client
-    
-    try:
-        return {
-            "config": {
-                "ODOO_URL": ODOO_URL,
-                "ODOO_DB": ODOO_DB,
-                "ODOO_USERNAME": ODOO_USERNAME,
-                "ODOO_PASSWORD": f"{'*' * (len(ODOO_PASSWORD)-2)}{ODOO_PASSWORD[-2:]}" if ODOO_PASSWORD else "NOT SET",
-                "password_length": len(ODOO_PASSWORD)
-            },
-            "test": {
-                "message": "Testing raw XML-RPC authentication...",
-                "step": "Connecting to common service",
-                "url": f"{ODOO_URL.rstrip('/')}/xmlrpc/2/common"
-            }
-        }
-    except Exception as e:
-        return {
-            "error": str(e),
-            "detail": "Failed to read configuration"
-        }
