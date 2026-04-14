@@ -128,24 +128,6 @@ def get_items(db: Session = Depends(get_db)):
 # Odoo APIs (CRUD)
 # -----------------------
 
-# ✅ GET partners
-@app.get("/odoo/partners")
-def get_odoo_partners(role: str = "customer", limit: int = 100):
-    try:
-        return odoo_service.get_partners(role=role, limit=limit)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ✅ GET customers shortcut
-@app.get("/odoo/customers")
-def get_odoo_customers(limit: int = 100):
-    try:
-        return odoo_service.get_customers(limit=limit)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @app.post("/customers")
 def customers(payload: PartnerActionPayload):
     action = payload.action
@@ -242,33 +224,6 @@ def vendors(payload: PartnerActionPayload):
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
-
-
-# ✅ POST create partner
-@app.post("/odoo/partners")
-def create_odoo_partner(partner: PartnerCreate):
-    try:
-        return odoo_service.create_partner(partner.dict())
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ✅ PUT update partner
-@app.put("/odoo/partners/{partner_id}")
-def update_odoo_partner(partner_id: int, partner: PartnerUpdate):
-    try:
-        return odoo_service.update_partner(partner_id, partner.dict())
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ✅ DELETE partner
-@app.delete("/odoo/partners/{partner_id}")
-def delete_odoo_partner(partner_id: int):
-    try:
-        return odoo_service.delete_partner(partner_id)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ✅ Verify Odoo auth
