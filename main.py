@@ -81,6 +81,20 @@ class PartnerUpdate(BaseModel):
     role: Optional[Literal["customer", "vendor", "all"]] = None
 
 
+class CustomerActionPayload(BaseModel):
+    action: Literal["create", "read", "update", "delete", "list"]
+    id: Optional[int] = None
+    query: Optional[str] = None
+    name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+    mobile: Optional[str] = None
+    company_type: Optional[Literal["person", "company"]] = None
+    vat: Optional[str] = None
+    role: Optional[Literal["customer", "vendor", "all"]] = "customer"
+    limit: Optional[int] = 100
+
+
 # -----------------------
 # DB Dependency
 # -----------------------
@@ -130,6 +144,102 @@ def get_odoo_customers(limit: int = 100):
         return odoo_service.get_customers(limit=limit)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/customers")
+def customers(payload: CustomerActionPayload):
+    action = payload.action
+
+    try:
+        if action == "create":
+            partner_data = payload.dict(exclude_none=True)
+            for key in ["action", "id", "query", "limit"]:
+                partner_data.pop(key, None)
+
+            return odoo_service.create_partner(partner_data)
+
+        elif action == "read":
+            if payload.id is not None:
+                return odoo_service.get_customer_by_id(payload.id)
+            if payload.query:
+                return odoo_service.search_customers(payload.query, limit=payload.limit or 100)
+            raise HTTPException(status_code=400, detail="read requires either id or query")
+
+        elif action == "update":
+            if payload.id is None:
+                raise HTTPException(status_code=400, detail="update requires id")
+
+            update_data = payload.dict(exclude_none=True)
+            for key in ["action", "id", "query", "limit"]:
+                update_data.pop(key, None)
+
+            if not update_data:
+                raise HTTPException(status_code=400, detail="update requires at least one field to change")
+
+            return odoo_service.update_partner(payload.id, update_data)
+
+        elif action == "delete":
+            if payload.id is None:
+                raise HTTPException(status_code=400, detail="delete requires id")
+            return odoo_service.delete_partner(payload.id)
+
+        elif action == "list":
+            return odoo_service.get_customers(limit=payload.limit or 100)
+
+        raise HTTPException(status_code=400, detail=f"Unsupported action: {action}")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/vendors")
+def vendors(payload: CustomerActionPayload):
+    action = payload.action
+
+    try:
+        if action == "create":
+            partner_data = payload.dict(exclude_none=True)
+            for key in ["action", "id", "query", "limit"]:
+                partner_data.pop(key, None)
+            if "role" not in partner_data or not partner_data["role"]:
+                partner_data["role"] = "vendor"
+
+            return odoo_service.create_partner(partner_data)
+
+        elif action == "read":
+            if payload.id is not None:
+                return odoo_service.get_vendor_by_id(payload.id)
+            if payload.query:
+                return odoo_service.search_vendors(payload.query, limit=payload.limit or 100)
+            raise HTTPException(status_code=400, detail="read requires either id or query")
+
+        elif action == "update":
+            if payload.id is None:
+                raise HTTPException(status_code=400, detail="update requires id")
+
+            update_data = payload.dict(exclude_none=True)
+            for key in ["action", "id", "query", "limit"]:
+                update_data.pop(key, None)
+
+            if not update_data:
+                raise HTTPException(status_code=400, detail="update requires at least one field to change")
+
+            return odoo_service.update_partner(payload.id, update_data)
+
+        elif action == "delete":
+            if payload.id is None:
+                raise HTTPException(status_code=400, detail="delete requires id")
+            return odoo_service.delete_partner(payload.id)
+
+        elif action == "list":
+            return odoo_service.get_vendors(limit=payload.limit or 100)
+
+        raise HTTPException(status_code=400, detail=f"Unsupported action: {action}")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 # ✅ POST create partner
