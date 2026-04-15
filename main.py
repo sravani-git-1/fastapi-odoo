@@ -124,9 +124,8 @@ def get_items(db: Session = Depends(get_db)):
 # -----------------------
 
 @app.post("/customers")
-async def customers(request: Request):
-    raw_data = await request.json()
-    clean_data = {k: v for k, v in raw_data.items() if v not in ["", None]}
+async def customers(payload: PartnerActionPayload):
+    clean_data = payload.dict(exclude_none=True)
     payload = PartnerActionPayload(**clean_data)
 
     action = payload.action
@@ -177,9 +176,8 @@ async def customers(request: Request):
 
 
 @app.post("/vendors")
-async def vendors(request: Request):
-    raw_data = await request.json()
-    clean_data = {k: v for k, v in raw_data.items() if v not in ["", None]}
+async def vendors(payload: PartnerActionPayload):
+    clean_data = payload.dict(exclude_none=True)
     payload = PartnerActionPayload(**clean_data)
 
     action = payload.action
