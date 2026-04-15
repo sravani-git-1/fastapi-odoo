@@ -1,107 +1,229 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from typing import Optional
+from fastapi import FastAPI, HTTPException, Depends, Request
+from sqlalchemy import create_engine, Column, Integer, String
+from sqlalchemy.orm import sessionmaker, declarative_base, Session
+from pydantic import BaseModel, EmailStr
+from typing import Optional, List, Literal
+
 from odoo_service import OdooService
 
 app = FastAPI()
+
+# -----------------------
+# Odoo Service
+# -----------------------
 odoo_service = OdooService()
 
+# -----------------------
+# Database Setup
+# -----------------------
+DATABASE_URL = "sqlite:///./test.db"
 
-# ---------------- REQUEST MODEL ----------------
-class RequestModel(BaseModel):
-    action: str
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False}
+)
+
+SessionLocal = sessionmaker(
+    bind=engine,
+    autoflush=False,
+    autocommit=False
+)
+
+Base = declarative_base()
+
+# -----------------------
+# DB Model
+# -----------------------
+class Item(Base):
+    __tablename__ = "items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+
+Base.metadata.create_all(bind=engine)
+
+# -----------------------
+# Pydantic Schemas
+# -----------------------
+
+class ItemCreate(BaseModel):
+    name: str
+
+class ItemResponse(BaseModel):
+    id: int
+    name: str
+
+    class Config:
+        from_attributes = True
+
+
+class PartnerCreate(BaseModel):
+    name: str
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+    mobile: Optional[str] = None
+    company_type: Optional[Literal["person", "company"]] = "person"
+    vat: Optional[str] = None
+    role: Optional[Literal["customer", "vendor", "all"]] = "customer"
+
+
+class PartnerUpdate(BaseModel):
+    name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+    mobile: Optional[str] = None
+    company_type: Optional[Literal["person", "company"]] = None
+    vat: Optional[str] = None
+    role: Optional[Literal["customer", "vendor", "all"]] = None
+
+
+class PartnerActionPayload(BaseModel):
+    action: Literal["create", "read", "update", "delete", "list"]
     id: Optional[int] = None
     query: Optional[str] = None
     name: Optional[str] = None
-    email: Optional[str] = None
+    email: Optional[EmailStr] = None
     phone: Optional[str] = None
     mobile: Optional[str] = None
+    company_type: Optional[Literal["person", "company"]] = None
+    vat: Optional[str] = None
+    role: Optional[Literal["customer", "vendor", "all"]] = None
+    limit: Optional[int] = 100
 
 
-@app.get("/")
-def home():
-    return {"message": "API running"}
+# -----------------------
+# DB Dependency
+# -----------------------
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
-# ---------------- CUSTOMERS ----------------
+# -----------------------
+# Local Item APIs
+# -----------------------
+@app.post("/items/", response_model=ItemResponse)
+def create_item(item: ItemCreate, db: Session = Depends(get_db)):
+    db_item = Item(name=item.name)
+    db.add(db_item)
+    db.commit()
+    db.refresh(db_item)
+    return db_item
+
+
+@app.get("/items/", response_model=List[ItemResponse])
+def get_items(db: Session = Depends(get_db)):
+    return db.query(Item).all()
+
+
+# -----------------------
+# Odoo APIs (CRUD)
+# -----------------------
+
 @app.post("/customers")
-def customers(data: RequestModel):
+async def customers(request: Request):
+    raw_data = await request.json()
+    clean_data = {k: v for k, v in raw_data.items() if v not in ["", None]}
+    payload = PartnerActionPayload(**clean_data)
+
+    action = payload.action
+
     try:
-        if data.action == "create":
-            return odoo_service.create_customer(data.dict())
+        if action == "create":
+            partner_data = payload.dict(exclude_none=True)
+            for key in ["action", "id", "query", "limit"]:
+                partner_data.pop(key, None)
+            if "role" not in partner_data or not partner_data["role"]:
+                partner_data["role"] = "customer"
 
-        elif data.action == "list":
-            return odoo_service.get_customers()
+            return odoo_service.create_customer(partner_data)
 
-        elif data.action == "read":
-            if data.id:
-                return odoo_service.get_customer_by_id(data.id)
-            if data.query:
-                return odoo_service.search_customers(data.query)
-            raise HTTPException(400, "Provide id or query")
+        elif action == "read":
+            if payload.id is not None:
+                return odoo_service.get_customer_by_id(payload.id)
+            if payload.query:
+                return odoo_service.search_customers(payload.query, limit=payload.limit or 100)
+            raise HTTPException(status_code=400, detail="read requires either id or query")
 
-        elif data.action == "update":
-            if not data.id:
-                raise HTTPException(400, "id required")
+        elif action == "update":
+            if payload.id is None:
+                raise HTTPException(status_code=400, detail="update requires id")
 
-            update_data = data.dict(exclude_none=True)
-            update_data.pop("action", None)
-            update_data.pop("id", None)
+            update_data = payload.dict(exclude_none=True)
+            for key in ["action", "id", "query", "limit"]:
+                update_data.pop(key, None)
 
-            return odoo_service.update_partner(data.id, update_data)
+            if not update_data:
+                raise HTTPException(status_code=400, detail="update requires at least one field to change")
 
-        elif data.action == "delete":
-            if not data.id:
-                raise HTTPException(400, "id required")
+            return odoo_service.update_partner(payload.id, update_data)
 
-            return odoo_service.delete_customer(data.id)
+        elif action == "delete":
+            if payload.id is None:
+                raise HTTPException(status_code=400, detail="delete requires id")
+            return odoo_service.delete_customer(payload.id)
 
-        else:
-            raise HTTPException(400, "Invalid action")
+        elif action == "list":
+            return odoo_service.get_customers(limit=payload.limit or 100)
 
+        raise HTTPException(status_code=400, detail=f"Unsupported action: {action}")
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(500, str(e))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
-# ---------------- VENDORS ----------------
 @app.post("/vendors")
-def vendors(data: RequestModel):
+async def vendors(request: Request):
+    raw_data = await request.json()
+    clean_data = {k: v for k, v in raw_data.items() if v not in ["", None]}
+    payload = PartnerActionPayload(**clean_data)
+
+    action = payload.action
+
     try:
-        if data.action == "create":
-            return odoo_service.create_vendor(data.dict())
+        if action == "create":
+            partner_data = payload.dict(exclude_none=True)
+            for key in ["action", "id", "query", "limit"]:
+                partner_data.pop(key, None)
+            if "role" not in partner_data or not partner_data["role"]:
+                partner_data["role"] = "vendor"
 
-        elif data.action == "list":
-            return odoo_service.get_vendors()
+            return odoo_service.create_vendor(partner_data)
 
-        elif data.action == "read":
-            if data.id:
-                return odoo_service.get_vendor_by_id(data.id)
-            if data.query:
-                return odoo_service.search_vendors(data.query)
-            raise HTTPException(400, "Provide id or query")
+        elif action == "read":
+            if payload.id is not None:
+                return odoo_service.get_vendor_by_id(payload.id)
+            if payload.query:
+                return odoo_service.search_vendors(payload.query, limit=payload.limit or 100)
+            raise HTTPException(status_code=400, detail="read requires either id or query")
 
-        elif data.action == "update":
-            if not data.id:
-                raise HTTPException(400, "id required")
+        elif action == "update":
+            if payload.id is None:
+                raise HTTPException(status_code=400, detail="update requires id")
 
-            update_data = data.dict(exclude_none=True)
-            update_data.pop("action", None)
-            update_data.pop("id", None)
+            update_data = payload.dict(exclude_none=True)
+            for key in ["action", "id", "query", "limit"]:
+                update_data.pop(key, None)
 
-            return odoo_service.update_partner(data.id, update_data)
+            if not update_data:
+                raise HTTPException(status_code=400, detail="update requires at least one field to change")
 
-        elif data.action == "delete":
-            if not data.id:
-                raise HTTPException(400, "id required")
+            return odoo_service.update_partner(payload.id, update_data)
 
-            return odoo_service.delete_vendor(data.id)
+        elif action == "delete":
+            if payload.id is None:
+                raise HTTPException(status_code=400, detail="delete requires id")
+            return odoo_service.delete_vendor(payload.id)
 
-        else:
-            raise HTTPException(400, "Invalid action")
+        elif action == "list":
+            return odoo_service.get_vendors(limit=payload.limit or 100)
 
+        raise HTTPException(status_code=400, detail=f"Unsupported action: {action}")
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(500, str(e))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
