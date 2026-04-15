@@ -1,39 +1,26 @@
-import os
 import xmlrpc.client
 from fastapi import HTTPException
 
 
 class OdooService:
     def __init__(self):
-        self.url = os.getenv("ODOO_URL")
-        self.db = os.getenv("ODOO_DB")
-        self.username = os.getenv("ODOO_USERNAME")
-        self.password = os.getenv("ODOO_PASSWORD")
+        # 🔥 YOUR DIRECT CREDENTIALS
+        self.url = "https://odoo.avowaldatasystems.in"
+        self.db = "odooKmmDb"
+        self.username = "rajugenai@gmail.com"
+        self.password = "Pa$$Word&$@"
 
-        # ✅ Safe check (no crash)
-        self.is_configured = all([
-            self.url,
-            self.db,
-            self.username,
-            self.password
-        ])
+        self.url = self.url.rstrip("/")
 
-        if self.is_configured:
-            self.url = self.url.rstrip("/")
-            self.common = xmlrpc.client.ServerProxy(f"{self.url}/xmlrpc/2/common")
-            self.models = xmlrpc.client.ServerProxy(f"{self.url}/xmlrpc/2/object")
-        else:
-            self.common = None
-            self.models = None
+        self.common = xmlrpc.client.ServerProxy(
+            f"{self.url}/xmlrpc/2/common", allow_none=True
+        )
+        self.models = xmlrpc.client.ServerProxy(
+            f"{self.url}/xmlrpc/2/object", allow_none=True
+        )
 
     # ---------------- AUTH ----------------
     def authenticate(self):
-        if not self.is_configured:
-            raise HTTPException(
-                status_code=500,
-                detail="Odoo not configured (set env vars in Render)"
-            )
-
         uid = self.common.authenticate(
             self.db,
             self.username,
@@ -42,7 +29,10 @@ class OdooService:
         )
 
         if not uid:
-            raise HTTPException(status_code=401, detail="Odoo auth failed")
+            raise HTTPException(
+                status_code=401,
+                detail="Odoo auth failed"
+            )
 
         return uid
 
@@ -109,49 +99,6 @@ class OdooService:
             [ids]
         )
 
-    # ---------------- READ ----------------
-    def get_customer_by_id(self, id):
-        return self._get_by_id(id)
-
-    def get_vendor_by_id(self, id):
-        return self._get_by_id(id)
-
-    def _get_by_id(self, id):
-        uid = self.authenticate()
-
-        result = self.models.execute_kw(
-            self.db, uid, self.password,
-            "res.partner", "read",
-            [[id]]
-        )
-
-        if not result:
-            raise HTTPException(status_code=404, detail="Not found")
-
-        return result
-
-    # ---------------- SEARCH ----------------
-    def search_customers(self, query):
-        return self._search(query)
-
-    def search_vendors(self, query):
-        return self._search(query)
-
-    def _search(self, query):
-        uid = self.authenticate()
-
-        ids = self.models.execute_kw(
-            self.db, uid, self.password,
-            "res.partner", "search",
-            [[["name", "ilike", query]]]
-        )
-
-        return self.models.execute_kw(
-            self.db, uid, self.password,
-            "res.partner", "read",
-            [ids]
-        )
-
     # ---------------- UPDATE ----------------
     def update_partner(self, id, data):
         uid = self.authenticate()
@@ -168,13 +115,7 @@ class OdooService:
         return {"message": "Updated successfully"}
 
     # ---------------- DELETE ----------------
-    def delete_customer(self, id):
-        return self._delete(id)
-
-    def delete_vendor(self, id):
-        return self._delete(id)
-
-    def _delete(self, id):
+    def delete_partner(self, id):
         uid = self.authenticate()
 
         result = self.models.execute_kw(
@@ -187,3 +128,9 @@ class OdooService:
             raise HTTPException(status_code=400, detail="Delete failed")
 
         return {"message": "Deleted successfully"}
+
+    def delete_customer(self, id):
+        return self.delete_partner(id)
+
+    def delete_vendor(self, id):
+        return self.delete_partner(id)

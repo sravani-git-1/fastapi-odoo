@@ -1,16 +1,13 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-
 from odoo_service import OdooService
 
 app = FastAPI()
 odoo_service = OdooService()
 
 
-# -----------------------
-# REQUEST MODEL (IMPORTANT FIX)
-# -----------------------
+# ---------------- REQUEST MODEL ----------------
 class RequestModel(BaseModel):
     action: str
     id: Optional[int] = None
@@ -26,15 +23,15 @@ def home():
     return {"message": "API running"}
 
 
-# -----------------------
-# CUSTOMERS
-# -----------------------
+# ---------------- CUSTOMERS ----------------
 @app.post("/customers")
 def customers(data: RequestModel):
-
     try:
         if data.action == "create":
             return odoo_service.create_customer(data.dict())
+
+        elif data.action == "list":
+            return odoo_service.get_customers()
 
         elif data.action == "read":
             if data.id:
@@ -59,25 +56,24 @@ def customers(data: RequestModel):
 
             return odoo_service.delete_customer(data.id)
 
-        elif data.action == "list":
-            return odoo_service.get_customers()
-
         else:
             raise HTTPException(400, "Invalid action")
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
 
 
-# -----------------------
-# VENDORS
-# -----------------------
+# ---------------- VENDORS ----------------
 @app.post("/vendors")
 def vendors(data: RequestModel):
-
     try:
         if data.action == "create":
             return odoo_service.create_vendor(data.dict())
+
+        elif data.action == "list":
+            return odoo_service.get_vendors()
 
         elif data.action == "read":
             if data.id:
@@ -102,11 +98,10 @@ def vendors(data: RequestModel):
 
             return odoo_service.delete_vendor(data.id)
 
-        elif data.action == "list":
-            return odoo_service.get_vendors()
-
         else:
             raise HTTPException(400, "Invalid action")
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
